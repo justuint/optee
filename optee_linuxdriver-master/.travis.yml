@@ -1,0 +1,56 @@
+# One may have a look at http://docs.travis-ci.com/user/installing-dependencies/
+
+language: c
+
+notifications:
+  - email: true
+
+before_install:
+  # Install the arm32 cross-compiler
+  - sudo apt-get update -qq
+  - sudo apt-get install -y gcc-arm-linux-gnueabihf
+  - arm-linux-gnueabihf-gcc --version
+  # Install bc (required by the kernel)
+  - sudo apt-get install bc
+  # Install 32-bit compatibility libraries for the Linaro arm64 cross-compiler
+  # (which is a 32-bit x86 binary)
+  - if [ `uname -m` = x86_64 ]; then sudo apt-get install libc6-i386 lib32stdc++6 lib32z1; fi
+
+before_script:
+  # Store the home repository
+  - export MYHOME=$PWD
+
+  # Download the arm64 compiler
+  - wget http://releases.linaro.org/14.08/components/toolchain/binaries/gcc-linaro-aarch64-linux-gnu-4.9-2014.08_linux.tar.xz
+  - tar xf gcc-linaro-aarch64-linux-gnu-4.9-2014.08_linux.tar.xz
+  - export PATH=$PATH:$PWD/gcc-linaro-aarch64-linux-gnu-4.9-2014.08_linux/bin
+
+  # Download the kernel
+  - git clone --depth 1 --branch v4.1-rc1 git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+  - export DST_KERNEL=$PWD/linux
+
+script:
+  # Check coding style
+  - git format-patch -1 --stdout | $DST_KERNEL/scripts/checkpatch.pl --ignore FILE_PATH_CHANGES --ignore GERRIT_CHANGE_ID -
+
+  # Go in the linux kernel repository
+  - cd $DST_KERNEL
+  - git reset --hard v4.1-rc1
+
+  # arm32 compilation
+  - export ARCH=arm
+  - export CROSS_COMPILE=arm-linux-gnueabihf-
+  - echo "CONFIG_MODULES=y" >> arch/arm/configs/multi_v7_defconfig
+  - echo "CONFIG_MODULE_UNLOAD=y" >> arch/arm/configs/multi_v7_defconfig
+  - make multi_v7_defconfig
+  - make -j`getconf _NPROCESSORS_ONLN` zImage
+  - make -j`getconf _NPROCESSORS_ONLN` M=$MYHOME modules
+
+  # arm64 compilation
+  - export ARCH=arm64
+  - export CROSS_COMPILE=aarch64-linux-gnu-
+  - rm -f .config
+  - make defconfig
+  - make -j`getconf _NPROCESSORS_ONLN` all
+  - make -j`getconf _NPROCESSORS_ONLN` M=$MYHOME modules
+
